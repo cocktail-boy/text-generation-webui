@@ -1,3 +1,4 @@
+import os
 import html
 import json
 import random
@@ -11,18 +12,20 @@ from extensions.silero_tts import tts_preprocessor
 from modules import chat, shared, ui_chat
 from modules.utils import gradio
 
+
+
 torch._C._jit_set_profiling_mode(False)
 
 
 params = {
     'activate': True,
-    'speaker': 'en_56',
+    'speaker': 'en_94',
     'language': 'English',
     'model_id': 'v3_en',
     'sample_rate': 48000,
     'device': 'cpu',
     'show_text': False,
-    'autoplay': True,
+    'autoplay': False,
     'voice_pitch': 'medium',
     'voice_speed': 'medium',
     'local_cache_path': ''  # User can override the default cache path to something other via settings.json
@@ -142,6 +145,174 @@ def output_modifier(string, state):
     shared.processing_message = "*Is typing...*"
     return string
 
+def generate_html_page(directory):
+    # Define the file paths
+    audio_files = sorted(Path(directory).rglob('*.wav'))
+    text_files = sorted(Path(directory).rglob('*.txt'))
+
+    # Extract file names
+    audio_files_names = [audio_file.name for audio_file in audio_files]
+    text_files_names = [text_file.name for text_file in text_files]
+
+    # Read the content of the text files
+    text_contents = []
+    for text_file in text_files:
+        with open(text_file, 'r') as file:
+            text_contents.append(file.read().replace('"', '\"'))
+
+    # Define the Javascript part
+    javascript = f"""
+    <script>
+        const audioFiles = {str(audio_files_names)};
+        const textContents = {str(text_contents)};
+
+        let audioIndex = 0;
+        let audioElement = new Audio(audioFiles[audioIndex]);
+
+        const audioPlayer = document.getElementById('audio-player');
+        const textDisplay = document.getElementById('text-display');
+        const playButton = document.getElementById('play-button');
+        const themeButton = document.getElementById('theme-button');
+
+        audioPlayer.appendChild(audioElement);
+
+        textDisplay.innerText = textContents[audioIndex];
+
+        audioElement.addEventListener('ended', function () {{
+            audioIndex++;
+            if (audioIndex < audioFiles.length) {{
+                audioElement.src = audioFiles[audioIndex];
+                textDisplay.style.opacity = '0';
+                setTimeout(function () {{
+                    textDisplay.innerText = textContents[audioIndex];
+                    textDisplay.style.opacity = '1';
+                }}, 500);  // reduced transition time to 0.5 seconds
+                audioElement.play();
+            }} else {{  // If all audio files have been played
+                audioIndex = 0;  // Reset the audio index
+                audioElement.src = audioFiles[audioIndex];  // Set the audio source to the first audio file
+                textDisplay.style.opacity = '0';  // Set the opacity of textDisplay to 0
+                setTimeout(function () {{
+                    textDisplay.innerText = textContents[audioIndex];  // Update the text display with index 0
+                    textDisplay.style.opacity = '1';  // Set the opacity of textDisplay to 1
+                }}, 500);
+                playButton.style.display = '';  // Show the "Start Playback" button again
+            }}
+        }});
+
+        playButton.addEventListener('click', function () {{
+            audioElement.play();
+            playButton.style.display = 'none';
+        }});
+
+        themeButton.addEventListener('click', function () {{
+            document.body.classList.toggle('dark-theme');
+        }});
+        document.body.classList.toggle('dark-theme');
+    </script>
+    """
+
+    # Generate the HTML content
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Audio Playback</title>
+        <style>
+            #text-display {{
+                margin-top: 2em;
+                font-size: 1.5em;
+                opacity: 1;
+                transition: opacity 0.5s;
+            }}
+            /* Dark theme CSS */
+            .dark-theme {{
+                background-color: #121212;
+                color: white;
+            }}
+        </style>
+    </head>
+    <body>
+        <button id="play-button">Start Playback</button>
+        <button id="theme-button">Toggle Dark/Light Theme</button>
+        <div id="audio-player"></div>
+        <div id="text-display"></div>
+        {javascript}
+    </body>
+    </html>
+    """
+
+    # Write the HTML content to a file
+    with open(Path(directory) / 'playback.html', 'w') as file:
+        file.write(html)
+
+def process_last_reply_with_TTS(history):
+    global model, current_params, streaming_state
+    for i in params:
+        if params[i] != current_params[i]:
+            model = load_model()
+            current_params = params.copy()
+            break
+
+    if len(history['visible']) == 0:
+        print('No history')
+        return
+
+    # Get the last visible reply
+    string = history['visible'][-1][1]
+
+    # Create a new directory for the outputs
+    current_time = int(time.time())
+    output_directory = Path(f"extensions/silero_tts/outputs/{shared.settings['character']}_{current_time}")
+    output_directory.mkdir(parents=True, exist_ok=True)
+
+    paragraphs = string.split('\n')
+
+    # Remove empty paragraphs or paragraphs that only contain whitespace
+    paragraphs = [paragraph for paragraph in paragraphs if paragraph.strip() != '']
+
+    audio_files = []
+    text_files = []
+    file_idx = 0
+
+    for paragraph in paragraphs:
+        preprocessed_paragraph = tts_preprocessor.preprocess(paragraph)
+
+        # Pad the file index with leading zeroes
+        padded_idx = str(file_idx).zfill(3)
+        padded_length = str(len(paragraphs)).zfill(3)
+        print(f'Generating audio file {padded_idx}/{padded_length}...')
+        print(f'Paragraph: {paragraph}')
+
+        output_file = output_directory / f'voice_{padded_idx}.wav'
+        text_file = output_directory / f'paragraph_{padded_idx}.txt'
+
+        # Save the original paragraph to a text file before generating audio
+        with open(text_file, 'w') as f:
+            f.write(paragraph)
+
+        prosody = '<prosody rate="{}" pitch="{}">'.format(params['voice_speed'], params['voice_pitch'])
+        silero_input = f'<speak>{prosody}{xmlesc(preprocessed_paragraph)}</prosody></speak>'
+        model.save_wav(ssml_text=silero_input, speaker=params['speaker'], sample_rate=int(params['sample_rate']), audio_path=str(output_file))
+
+        audio_files.append(str(output_file))
+        text_files.append(str(text_file))
+
+        file_idx += 1  # Increment file index only after a successful file creation
+
+    generate_html_page(str(output_directory))  # Generate the HTML page
+
+    # Create the output string with links to the audio files
+    output_string = ''
+    for idx, (audio_file, text_file) in enumerate(zip(audio_files, text_files)):
+        output_string += f'<audio src="file/{audio_file}" controls></audio>'
+        output_string += paragraphs[idx]
+    output_string += f'<p><a href="file/{str(output_directory)}/playback.html" target="_blank">Link to HTML Playback Page</a></p>'
+
+    # Replace the last visible reply with the output string
+    history['visible'][-1] = [history['visible'][-1][0], output_string]
+
+    return history
 
 def setup():
     global model
@@ -205,9 +376,15 @@ def ui():
             preview_audio = gr.HTML(visible=False)
 
         with gr.Row():
+            process_last_reply = gr.Button('Process last reply with TTS')
             convert = gr.Button('Permanently replace audios with the message texts')
             convert_cancel = gr.Button('Cancel', visible=False)
             convert_confirm = gr.Button('Confirm (cannot be undone)', variant="stop", visible=False)
+
+    # Gradio callbacks
+    process_last_reply.click(process_last_reply_with_TTS, gradio('history'), gradio('history')).then(
+        chat.save_history, shared.gradio['mode'], None, show_progress=False).then(
+        chat.redraw_html, shared.reload_inputs, shared.gradio['display'])
 
     # Convert history with confirmation
     convert_arr = [convert_confirm, convert, convert_cancel]
