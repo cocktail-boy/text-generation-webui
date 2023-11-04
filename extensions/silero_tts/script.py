@@ -18,7 +18,7 @@ torch._C._jit_set_profiling_mode(False)
 
 
 params = {
-    'activate': True,
+    'activate': False,
     'speaker': 'en_94',
     'language': 'English',
     'model_id': 'v3_en',
@@ -259,7 +259,7 @@ def process_last_reply_with_TTS(history):
         return
 
     # Get the last visible reply
-    string = history['visible'][-1][1]
+    string = history['visible'][-1][1].replace("&#x27;","'").replace("&quot;",'"').replace("&amp;","&").replace("&lt;","<").replace("&gt;",">")
 
     # Create a new directory for the outputs
     current_time = int(time.time())
@@ -276,7 +276,7 @@ def process_last_reply_with_TTS(history):
     file_idx = 0
 
     for paragraph in paragraphs:
-        preprocessed_paragraph = tts_preprocessor.preprocess(paragraph)
+        preprocessed_paragraph = tts_preprocessor.preprocess(html.unescape(paragraph))
 
         # Pad the file index with leading zeroes
         padded_idx = str(file_idx).zfill(3)

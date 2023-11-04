@@ -1,3 +1,4 @@
 # Only used by the one-click installer.
 # Example:
 # --listen --api
+--auto-devices --wbits 4 --loader ExLlama --max_seq_len 4096 --compress_pos_emb 2 --model TheBloke_Guanaco-33B-SuperHOT-8K-GPTQ
