@@ -4,6 +4,7 @@ import hashlib
 import os
 import platform
 import re
+import signal
 import site
 import subprocess
 import sys
@@ -20,11 +21,18 @@ conda_env_path = os.path.join(script_dir, "installer_files", "env")
 cmd_flags_path = os.path.join(script_dir, "CMD_FLAGS.txt")
 if os.path.exists(cmd_flags_path):
     with open(cmd_flags_path, 'r') as f:
-        CMD_FLAGS = ' '.join(line.strip() for line in f if line.strip() and not line.strip().startswith('#'))
+        CMD_FLAGS = ' '.join(line.strip().rstrip('\\').strip() for line in f if line.strip().rstrip('\\').strip() and not line.strip().startswith('#'))
 else:
     CMD_FLAGS = ''
 
 flags = f"{' '.join([flag for flag in sys.argv[1:] if flag != '--update'])} {CMD_FLAGS}"
+
+
+def signal_handler(sig, frame):
+    sys.exit(0)
+
+
+signal.signal(signal.SIGINT, signal_handler)
 
 
 def is_linux():
@@ -49,6 +57,19 @@ def cpu_has_avx2():
 
         info = cpuinfo.get_cpu_info()
         if 'avx2' in info['flags']:
+            return True
+        else:
+            return False
+    except:
+        return True
+
+
+def cpu_has_amx():
+    try:
+        import cpuinfo
+
+        info = cpuinfo.get_cpu_info()
+        if 'amx' in info['flags']:
             return True
         else:
             return False
@@ -177,7 +198,7 @@ def install_webui():
             use_cuda118 = "Y" if os.environ.get("USE_CUDA118", "").lower() in ("yes", "y", "true", "1", "t", "on") else "N"
         else:
             # Ask for CUDA version if using NVIDIA
-            print("\nWould you like to use CUDA 11.8 instead of 12.1? This is only necessary for older GPUs like Kepler.\nIf unsure, say \"N\".\n")
+            print("\nDo you want to use CUDA 11.8 instead of 12.1? Only choose this option if your GPU is very old (Kepler or older).\nFor RTX and GTX series GPUs, say \"N\". If unsure, say \"N\".\n")
             use_cuda118 = input("Input (Y/N)> ").upper().strip('"\'').strip()
             while use_cuda118 not in 'YN':
                 print("Invalid choice. Please try again.")
@@ -197,13 +218,15 @@ def install_webui():
     elif is_linux() and (choice == "C" or choice == "N"):
         install_pytorch = "python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu"
     elif choice == "D":
-        install_pytorch = "python -m pip install torch==2.0.1a0 torchvision==0.15.2a0 intel_extension_for_pytorch==2.0.110+xpu -f https://developer.intel.com/ipex-whl-stable-xpu"
+        install_pytorch = "python -m pip install torch==2.1.0a0 torchvision==0.16.0a0 intel_extension_for_pytorch==2.1.10+xpu --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/"
 
     # Install Git and then Pytorch
+    print_big_message("Installing PyTorch.")
     run_cmd(f"{install_git} && {install_pytorch} && python -m pip install py-cpuinfo==9.0.0", assert_success=True, environment=True)
 
     # Install CUDA libraries (this wasn't necessary for Pytorch before...)
     if choice == "A":
+        print_big_message("Installing the CUDA runtime libraries.")
         run_cmd(f"conda install -y -c \"nvidia/label/{'cuda-12.1.1' if use_cuda118 == 'N' else 'cuda-11.8.0'}\" cuda-runtime", assert_success=True, environment=True)
 
     # Install the webui requirements
@@ -229,7 +252,7 @@ def update_requirements(initial_installation=False):
     # Check for differences in installation file hashes
     for file_name in files_to_check:
         if before_pull_hashes[file_name] != after_pull_hashes[file_name]:
-            print(f"File '{file_name}' was updated during 'git pull'. Please run the script again.")
+            print_big_message(f"File '{file_name}' was updated during 'git pull'. Please run the script again.")
             exit(1)
 
     # Extensions requirements are installed only during the initial install by default.
@@ -240,20 +263,18 @@ def update_requirements(initial_installation=False):
 
     if install:
         print_big_message("Installing extensions requirements.")
-        extensions = next(os.walk("extensions"))[1]
-        for extension in extensions:
-            if extension in ['superbooga', 'superboogav2']:  # No wheels available for requirements
-                continue
-
+        skip = ['superbooga', 'superboogav2', 'coqui_tts']  # Fail to install on Windows
+        extensions = [foldername for foldername in os.listdir('extensions') if os.path.isfile(os.path.join('extensions', foldername, 'requirements.txt'))]
+        extensions = [x for x in extensions if x not in skip]
+        for i, extension in enumerate(extensions):
+            print(f"\n\n--- [{i+1}/{len(extensions)}]: {extension}\n\n")
             extension_req_path = os.path.join("extensions", extension, "requirements.txt")
-            if os.path.exists(extension_req_path):
-                run_cmd("python -m pip install -r " + extension_req_path + " --upgrade", assert_success=True, environment=True)
+            run_cmd("python -m pip install -r " + extension_req_path + " --upgrade", assert_success=False, environment=True)
     elif initial_installation:
         print_big_message("Will not install extensions due to INSTALL_EXTENSIONS environment variable.")
 
     # Detect the Python and PyTorch versions
     torver = torch_version()
-    print(f"TORCH: {torver}")
     is_cuda = '+cu' in torver
     is_cuda118 = '+cu118' in torver  # 2.1.0+cu118
     is_cuda117 = '+cu117' in torver  # 2.0.1+cu117
@@ -282,13 +303,18 @@ def update_requirements(initial_installation=False):
         else:
             requirements_file = "requirements_noavx2.txt"
 
-    # Prepare the requirements file
     print_big_message(f"Installing webui requirements from file: {requirements_file}")
+    print(f"TORCH: {torver}\n")
+
+    # Prepare the requirements file
     textgen_requirements = open(requirements_file).read().splitlines()
     if is_cuda117:
         textgen_requirements = [req.replace('+cu121', '+cu117').replace('+cu122', '+cu117').replace('torch2.1', 'torch2.0') for req in textgen_requirements]
     elif is_cuda118:
         textgen_requirements = [req.replace('+cu121', '+cu118').replace('+cu122', '+cu118') for req in textgen_requirements]
+    if is_windows() and (is_cuda117 or is_cuda118):  # No flash-attention on Windows for CUDA 11
+        textgen_requirements = [req for req in textgen_requirements if 'jllllll/flash-attention' not in req]
+
     with open('temp_requirements.txt', 'w') as file:
         file.write('\n'.join(textgen_requirements))
 
@@ -299,6 +325,11 @@ def update_requirements(initial_installation=False):
         package_name = url.split("/")[-1].split("@")[0].rstrip(".git")
         run_cmd("python -m pip uninstall -y " + package_name, environment=True)
         print(f"Uninstalled {package_name}")
+
+    # Make sure that API requirements are installed (temporary)
+    extension_req_path = os.path.join("extensions", "openai", "requirements.txt")
+    if os.path.exists(extension_req_path):
+        run_cmd("python -m pip install -r " + extension_req_path + " --upgrade", environment=True)
 
     # Install/update the project requirements
     run_cmd("python -m pip install -r temp_requirements.txt --upgrade", assert_success=True, environment=True)

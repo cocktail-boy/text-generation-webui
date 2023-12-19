@@ -11,9 +11,13 @@ LLMs work by generating one token at a time. Given your prompt, the model calcul
 
 ### Preset menu
 
-Can be used to save combinations of parameters for reuse. 
+Can be used to save and load combinations of parameters for reuse.
 
-The built-in presets were not manually chosen. They were obtained after a blind contest called "Preset Arena" where hundreds of people voted. The full results can be found [here](https://github.com/oobabooga/oobabooga.github.io/blob/main/arena/results.md).
+* **🎲 button**: creates a random yet interpretable preset. Only 1 parameter of each category is included for the categories: removing tail tokens, avoiding repetition, and flattening the distribution. That is, top_p and top_k are not mixed, and neither are repetition_penalty and frequency_penalty. You can use this button to break out of a loop of bad generations after multiple "Regenerate" attempts.
+
+#### Built-in presets
+
+These were obtained after a blind contest called "Preset Arena" where hundreds of people voted. The full results can be found [here](https://github.com/oobabooga/oobabooga.github.io/blob/main/arena/results.md).
 
 A key takeaway is that the best presets are:
 
@@ -33,9 +37,11 @@ For more information about the parameters, the [transformers documentation](http
 * **max_new_tokens**: Maximum number of tokens to generate. Don't set it higher than necessary: it is used in the truncation calculation through the formula `(prompt_length) = min(truncation_length - max_new_tokens, prompt_length)`, so your prompt will get truncated if you set it too high.
 * **temperature**: Primary factor to control the randomness of outputs. 0 = deterministic (only the most likely token is used). Higher value = more randomness.
 * **top_p**: If not set to 1, select tokens with probabilities adding up to less than this number. Higher value = higher range of possible random results.
+* **min_p**: Tokens with probability smaller than `(min_p) * (probability of the most likely token)` are discarded. This is the same as top_a but without squaring the probability.
 * **top_k**: Similar to top_p, but select instead only the top_k most likely tokens. Higher value = higher range of possible random results.
 * **repetition_penalty**: Penalty factor for repeating prior tokens. 1 means no penalty, higher value = less repetition, lower value = more repetition.
-* **additive_repetition_penalty**: Similar to repetition_penalty, but with an additive offset on the raw token scores instead of a multiplicative factor. It may generate better results. 0 means no penalty, higher value = less repetition, lower value = more repetition.
+* **presence_penalty**: Similar to repetition_penalty, but with an additive offset on the raw token scores instead of a multiplicative factor. It may generate better results. 0 means no penalty, higher value = less repetition, lower value = more repetition. Previously called "additive_repetition_penalty".
+* **frequency_penalty**: Repetition penalty that scales based on how many times the token has appeared in the context. Be careful with this; there's no limit to how much a token can be penalized.
 * **repetition_penalty_range**: The number of most recent tokens to consider for repetition penalty. 0 makes all tokens be used.
 * **typical_p**: If not set to 1, select only tokens that are at least this much more likely to appear than random tokens, given the prior text.
 * **tfs**: Tries to detect a tail of low-probability tokens in the distribution and removes those tokens. See [this blog post](https://www.trentonbricken.com/Tail-Free-Sampling/) for details. The closer to 0, the more discarded tokens.
@@ -47,7 +53,8 @@ For more information about the parameters, the [transformers documentation](http
 * **penalty_alpha**: Contrastive Search is enabled by setting this to greater than zero and unchecking "do_sample". It should be used with a low value of top_k, for instance, top_k = 4.
 * **mirostat_mode**: Activates the Mirostat sampling technique. It aims to control perplexity during sampling. See the [paper](https://arxiv.org/abs/2007.14966).
 * **mirostat_tau**: No idea, see the paper for details. According to the Preset Arena, 8 is a good value. 
-* **mirostat_tau**: No idea, see the paper for details. According to the Preset Arena, 0.1 is a good value.
+* **mirostat_eta**: No idea, see the paper for details. According to the Preset Arena, 0.1 is a good value.
+* **temperature_last**: Makes temperature the last sampler instead of the first. With this, you can remove low probability tokens with a sampler like min_p and then use a high temperature to make the model creative without losing coherency.
 * **do_sample**: When unchecked, sampling is entirely disabled, and greedy decoding is used instead (the most likely token is always picked).
 * **Seed**: Set the Pytorch seed to this number. Note that some loaders do not use Pytorch (notably llama.cpp), and others are not deterministic (notably ExLlama v1 and v2). For these loaders, the seed has no effect.
 * **encoder_repetition_penalty**: Also known as the "Hallucinations filter". Used to penalize tokens that are *not* in the prior text. Higher value = more likely to stay in context, lower value = more likely to diverge.
@@ -94,14 +101,13 @@ So you can use those special placeholders in your character definitions. They ar
 
 Defines the instruction template that is used in the Chat tab when "instruct" or "chat-instruct" are selected under "Mode".
 
-* **Instruction template**: A dropdown menu where you can select from saved templates, save a new template (💾 button), and delete the currently selected template (🗑️).
-* **User string**: In the turn template, `<|user|>` gets replaced with this string.
-* **Bot string**: In the turn template, `<|bot|>` gets replaced with this string.
-* **Context**: A string that appears as-is at the top of the prompt, including the new line characters at the end (if any). The system message for the model can be edited inside this string to customize its behavior.
-* **Turn template**: Defines the positioning of spaces and new line characters in a single turn of the dialogue. `<|user-message|>` gets replaced with the user input and `<|bot-message|>` gets replaced with the bot reply. It is necessary to include `<|user|>` and `<|bot|>` even if "User string" and "Bot string" above are empty, as those placeholders are used to split the template in parts in the backend.
+* **Saved instruction templates**: A dropdown menu where you can load a saved template, save a new template (💾 button), and delete the currently selected template (🗑️).
+* **Custom system message**: A message that defines the personality of the chatbot, replacing its default "System message" string. Example: "You are a duck."
+* **Instruction template**: A Jinja2 template that defines the prompt format for the instruction-following conversation.
 * **Send to default**: Send the full instruction template in string format to the Default tab.
 * **Send to notebook**: Send the full instruction template in string format to the Notebook tab.
 * **Send to negative prompt**: Send the full instruction template in string format to the "Negative prompt" field under "Parameters" > "Generation".
+* **Chat template**: A Jinja2 template that defines the prompt format for regular chat conversations with characters.
 * **Command for chat-instruct mode**: The command that is used in chat-instruct mode to query the model to generate a reply on behalf of the character. Can be used creatively to generate specific kinds of responses.
 
 ## Chat history

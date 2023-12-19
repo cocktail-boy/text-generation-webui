@@ -36,7 +36,7 @@ def create_ui():
         shared.gradio['toggle_dark_mode'].click(lambda: None, None, None, _js='() => {document.getElementsByTagName("body")[0].classList.toggle("dark")}')
         shared.gradio['save_settings'].click(
             ui.gather_interface_values, gradio(shared.input_elements), gradio('interface_state')).then(
-            ui.save_settings, gradio('interface_state', 'preset_menu', 'instruction_template', 'extensions_menu', 'show_controls'), gradio('save_contents')).then(
+            ui.save_settings, gradio('interface_state', 'preset_menu', 'extensions_menu', 'show_controls'), gradio('save_contents')).then(
             lambda: './', None, gradio('save_root')).then(
             lambda: 'settings.yaml', None, gradio('save_filename')).then(
             lambda: gr.update(visible=True), None, gradio('file_saver'))
@@ -51,12 +51,14 @@ def set_interface_arguments(extensions, bool_active):
         setattr(shared.args, k, False)
     for k in bool_active:
         setattr(shared.args, k, True)
+        if k == 'api':
+            shared.add_extension('openai', last=True)
 
     shared.need_restart = True
 
 
 def get_boolean_arguments(active=False):
-    exclude = ["default", "notebook", "chat"]
+    exclude = shared.deprecated_args
 
     cmd_list = vars(shared.args)
     bool_list = sorted([k for k in cmd_list if type(cmd_list[k]) is bool and k not in exclude + ui.list_model_elements()])

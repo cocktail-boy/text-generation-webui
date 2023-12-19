@@ -123,6 +123,8 @@ targetElement.addEventListener("scroll", function() {
 // Create a MutationObserver instance
 const observer = new MutationObserver(function(mutations) {
   mutations.forEach(function(mutation) {
+    updateChatHeight();
+
     if(!isScrolled) {
       targetElement.scrollTop = targetElement.scrollHeight;
     }
@@ -152,56 +154,6 @@ const config = {
 
 // Start observing the target element
 observer.observe(targetElement, config);
-
-//------------------------------------------------
-// Notebook box scrolling
-//------------------------------------------------
-const notebookElement = document.querySelector("#textbox-notebook textarea");
-let notebookScrolled = false;
-
-notebookElement.addEventListener("scroll", function() {
-  let diff = notebookElement.scrollHeight - notebookElement.clientHeight;
-  if(Math.abs(notebookElement.scrollTop - diff) <= 10 || diff == 0) {
-    notebookScrolled = false;
-  } else {
-    notebookScrolled = true;
-  }
-});
-
-const notebookObserver = new MutationObserver(function(mutations) {
-  mutations.forEach(function(mutation) {
-    if(!notebookScrolled) {
-      notebookElement.scrollTop = notebookElement.scrollHeight;
-    }
-  });
-});
-
-notebookObserver.observe(notebookElement.parentNode.parentNode.parentNode, config);
-
-//------------------------------------------------
-// Default box scrolling
-//------------------------------------------------
-const defaultElement = document.querySelector("#textbox-default textarea");
-let defaultScrolled = false;
-
-defaultElement.addEventListener("scroll", function() {
-  let diff = defaultElement.scrollHeight - defaultElement.clientHeight;
-  if(Math.abs(defaultElement.scrollTop - diff) <= 10 || diff == 0) {
-    defaultScrolled = false;
-  } else {
-    defaultScrolled = true;
-  }
-});
-
-const defaultObserver = new MutationObserver(function(mutations) {
-  mutations.forEach(function(mutation) {
-    if(!defaultScrolled) {
-      defaultElement.scrollTop = defaultElement.scrollHeight;
-    }
-  });
-});
-
-defaultObserver.observe(defaultElement.parentNode.parentNode.parentNode, config);
 
 //------------------------------------------------
 // Add some scrollbars
@@ -312,6 +264,10 @@ document.addEventListener("click", function (event) {
   if (!isMouseOverButtonOrMenu() && menu.style.display === "flex") {
     hideMenu();
   }
+
+  if (event.target.classList.contains("pfp_character")) {
+    toggleBigPicture();
+  }
 });
 
 //------------------------------------------------
@@ -335,3 +291,49 @@ document.getElementById("show-controls").parentNode.style.bottom = "0px";
 // Focus on the chat input
 //------------------------------------------------
 document.querySelector("#chat-input textarea").focus();
+
+//------------------------------------------------
+// Show enlarged character picture when the profile
+// picture is clicked on
+//------------------------------------------------
+let bigPictureVisible = false;
+
+function addBigPicture() {
+  var imgElement = document.createElement("img");
+  var timestamp = new Date().getTime();
+  imgElement.src = "/file/cache/pfp_character.png?time=" + timestamp;
+  imgElement.classList.add("bigProfilePicture");
+
+  var imgElementParent = document.getElementById("chat").parentNode.parentNode.parentNode.parentNode.parentNode.parentNode.parentNode;
+  imgElementParent.appendChild(imgElement);
+}
+
+function deleteBigPicture() {
+  var bigProfilePictures = document.querySelectorAll('.bigProfilePicture');
+  bigProfilePictures.forEach(function (element) {
+    element.parentNode.removeChild(element);
+  });
+}
+
+function toggleBigPicture() {
+  if(bigPictureVisible) {
+    deleteBigPicture();
+    bigPictureVisible = false;
+  } else {
+    addBigPicture();
+    bigPictureVisible = true;
+  }
+}
+
+//------------------------------------------------
+// Define the --chat-height global CSS variable to
+// the height of the chat parent
+//------------------------------------------------
+function updateChatHeight() {
+  const chatContainer = document.getElementById('chat').parentNode.parentNode.parentNode;
+  const newChatHeight = `${chatContainer.clientHeight}px`;
+
+  document.documentElement.style.setProperty('--chat-height', newChatHeight);
+}
+
+window.addEventListener('resize', updateChatHeight);

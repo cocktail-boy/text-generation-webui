@@ -1,6 +1,8 @@
 import os
 import warnings
 
+import accelerate  # This early import makes Intel GPUs happy
+
 import modules.one_click_installer_check
 from modules.block_requests import OpenMonkeyPatch, RequestBlocker
 from modules.logging_colors import logger
@@ -9,6 +11,7 @@ os.environ['GRADIO_ANALYTICS_ENABLED'] = 'False'
 os.environ['BITSANDBYTES_NOWELCOME'] = '1'
 warnings.filterwarnings('ignore', category=UserWarning, message='TypedStorage is deprecated')
 warnings.filterwarnings('ignore', category=UserWarning, message='Using the update method is deprecated')
+warnings.filterwarnings('ignore', category=UserWarning, message='Field "model_name" has conflict')
 
 with RequestBlocker():
     import gradio as gr
@@ -19,6 +22,7 @@ matplotlib.use('Agg')  # This fixes LaTeX rendering on some systems
 
 import json
 import os
+import signal
 import sys
 import time
 from functools import partial
@@ -53,6 +57,14 @@ from modules.models_settings import (
 from modules.utils import gradio
 
 
+def signal_handler(sig, frame):
+    logger.info("Received Ctrl+C. Shutting down Text generation web UI gracefully.")
+    sys.exit(0)
+
+
+signal.signal(signal.SIGINT, signal_handler)
+
+
 def create_interface():
 
     title = 'Text generation web UI'
@@ -75,7 +87,7 @@ def create_interface():
         'loader': shared.args.loader or 'Transformers',
         'mode': shared.settings['mode'],
         'character_menu': shared.args.character or shared.settings['character'],
-        'instruction_template': shared.settings['instruction_template'],
+        'instruction_template_str': shared.settings['instruction_template_str'],
         'prompt_menu-default': shared.settings['prompt-default'],
         'prompt_menu-notebook': shared.settings['prompt-notebook'],
         'filter_by_loader': shared.args.loader or 'All'
@@ -216,8 +228,7 @@ if __name__ == "__main__":
             model_name = shared.model_name
 
         model_settings = get_model_metadata(model_name)
-        shared.settings.update({k: v for k, v in model_settings.items() if k in shared.settings})  # hijacking the interface defaults
-        update_model_parameters(model_settings, initial=True)  # hijacking the command-line arguments
+        update_model_parameters(model_settings, initial=True)  # hijack the command-line arguments
 
         # Load the model
         shared.model, shared.tokenizer = load_model(model_name)
@@ -226,13 +237,19 @@ if __name__ == "__main__":
 
     shared.generation_lock = Lock()
 
-    # Launch the web UI
-    create_interface()
-    while True:
-        time.sleep(0.5)
-        if shared.need_restart:
-            shared.need_restart = False
+    if shared.args.nowebui:
+        # Start the API in standalone mode
+        shared.args.extensions = [x for x in shared.args.extensions if x != 'gallery']
+        if shared.args.extensions is not None and len(shared.args.extensions) > 0:
+            extensions_module.load_extensions()
+    else:
+        # Launch the web UI
+        create_interface()
+        while True:
             time.sleep(0.5)
-            shared.gradio['interface'].close()
-            time.sleep(0.5)
-            create_interface()
+            if shared.need_restart:
+                shared.need_restart = False
+                time.sleep(0.5)
+                shared.gradio['interface'].close()
+                time.sleep(0.5)
+                create_interface()

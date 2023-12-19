@@ -2,6 +2,7 @@ from pathlib import Path
 
 import torch
 from peft import PeftModel
+from transformers import is_torch_xpu_available
 
 import modules.shared as shared
 from modules.logging_colors import logger
@@ -144,14 +145,12 @@ def add_lora_transformers(lora_names):
         if len(lora_names) > 1:
             merge_loras()
 
+        shared.lora_names = lora_names
         return
 
     # If any LoRA needs to be removed, start over
     if len(removed_set) > 0:
-        # shared.model may no longer be PeftModel
-        if hasattr(shared.model, 'disable_adapter'):
-            shared.model.disable_adapter()
-            shared.model = shared.model.base_model.model
+        shared.model = shared.model.unload()
 
     if len(lora_names) > 0:
         params = {}
@@ -171,16 +170,19 @@ def add_lora_transformers(lora_names):
         if len(lora_names) > 1:
             merge_loras()
 
-        shared.lora_names = lora_names
-
         if not shared.args.load_in_8bit and not shared.args.cpu:
             shared.model.half()
             if not hasattr(shared.model, "hf_device_map"):
                 if torch.backends.mps.is_available():
                     device = torch.device('mps')
                     shared.model = shared.model.to(device)
+                elif is_torch_xpu_available():
+                    device = torch.device("xpu:0")
+                    shared.model = shared.model.to(device)
                 else:
                     shared.model = shared.model.cuda()
+
+    shared.lora_names = lora_names
 
 
 def merge_loras():
